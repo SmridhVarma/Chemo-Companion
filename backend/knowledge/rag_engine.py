@@ -62,8 +62,7 @@ class RAGEngine:
 
         # 3. Combine and score
         vector_context = "\n\n".join([
-            f"[Source: {r['source']}, Page {r['page']}]\n{r['text']}"
-            for r in vector_results
+            r['text'] for r in vector_results
         ])
 
         # Calculate confidence score

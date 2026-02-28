@@ -487,19 +487,9 @@ function SourcesDropdown({ citations }: { citations: Citation[] }) {
                   >
                     <FileText className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs text-gray-700 font-medium leading-snug truncate">
+                      <p className="text-xs text-gray-700 font-medium leading-snug">
                         {src.label}
                       </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {src.page && (
-                          <span className="text-[10px] text-gray-400">p.{src.page}</span>
-                        )}
-                        {src.relevance && src.relevance > 0 && (
-                          <span className="text-[10px] text-indigo-400">
-                            {Math.round(src.relevance * 100)}% match
-                          </span>
-                        )}
-                      </div>
                     </div>
                   </div>
                 ))}

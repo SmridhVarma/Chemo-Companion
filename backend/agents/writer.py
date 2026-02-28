@@ -124,16 +124,24 @@ EXTERNAL VERIFIED SOURCES:
 def _fallback_answer(query: str, lookup_result: dict,
                      browser_result: Optional[dict] = None) -> dict:
     """Simple fallback when Gemini is unavailable."""
-    context = lookup_result.get("context", "No information found in the knowledge base.")
+    import re
+    context = lookup_result.get("context", "")
     sources = lookup_result.get("sources", [])
 
-    answer = f"Based on the available medical documents:\n\n{context[:1000]}"
+    # Strip any [Source: ...] markers from context
+    clean_context = re.sub(r'\[Source:.*?\]\n?', '', context).strip()
+
+    if clean_context:
+        answer = f"Here's what I found that may help:\n\n{clean_context[:1500]}"
+    else:
+        answer = "I wasn't able to find specific information on that topic in my knowledge base."
 
     if browser_result and browser_result.get("context"):
-        answer += f"\n\nFrom verified external sources:\n{browser_result['context'][:500]}"
+        browser_text = re.sub(r'\[Source:.*?\]\n?', '', browser_result['context']).strip()
+        answer += f"\n\n{browser_text[:500]}"
         sources.extend(browser_result.get("sources", []))
 
-    answer += "\n\n⚠️ Please consult your oncologist for personalized medical advice."
+    answer += "\n\n💡 Please discuss any specific concerns with your oncologist or care team."
 
     return {
         "agent": "writer",
