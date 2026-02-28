@@ -1,8 +1,28 @@
+# Secrets
 .env
+
+# Python
 __pycache__/
 *.pyc
+
+# Backend generated data
 backend/data/
 backend/chroma_db/
+
+# Node
 node_modules/
-frontend/dist/
+
+# Build output
+dist/
+frontend-react/dist/
+
+# Removed / unnecessary frontends
+frontend/
+frontend_from_figma/
+
+# Debug scripts
+backend/debug_probe.py
+
+# IDE / Editor
 .vscode/
+.gemini/
