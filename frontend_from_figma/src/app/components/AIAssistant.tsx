@@ -127,15 +127,20 @@ export function AIAssistant() {
       let buffer = '';
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (!done) {
+          buffer += decoder.decode(value, { stream: true });
+        } else {
+          // Flush any remaining decoder bytes
+          buffer += decoder.decode();
+        }
 
-        buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = done ? '' : (lines.pop() || '');
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
+          const trimmedLine = line.trim();
+          if (!trimmedLine.startsWith('data: ')) continue;
+          const data = trimmedLine.slice(6).trim();
           if (data === '[DONE]') continue;
 
           try {
@@ -172,6 +177,8 @@ export function AIAssistant() {
             }
           } catch { /* skip non-JSON lines */ }
         }
+
+        if (done) break;
       }
 
       // Finalize AI message
