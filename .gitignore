@@ -18,7 +18,10 @@ frontend-react/dist/
 
 # Removed / unnecessary frontends
 frontend/
-frontend_from_figma/
+
+# Figma frontend build output (rebuilt via npm run build)
+frontend_from_figma/dist/
+frontend_from_figma/node_modules/
 
 # Debug scripts
 backend/debug_probe.py

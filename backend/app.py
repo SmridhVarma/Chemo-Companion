@@ -326,11 +326,10 @@ def run_graph_build():
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend-react" / "dist"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend_from_figma" / "dist"
 
-# Serve static assets (CSS, JS bundles in assets/) — only active after `npm run build`
-if FRONTEND_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
+# Serve static assets (CSS, JS bundles in assets/)
+app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")
 
 @app.get("/app")
 def serve_frontend():
