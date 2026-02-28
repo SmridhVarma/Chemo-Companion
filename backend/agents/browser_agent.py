@@ -51,8 +51,12 @@ def search_verified_domains(query: str, max_results: int = 5) -> dict:
             "message": "Could not retrieve external information. Using internal knowledge only.",
         }
 
-    # Summarize results using Gemini
-    context = _summarize_results(query, results)
+    # Skip Gemini summarization to conserve API quota.
+    # The Writer agent will synthesize browser snippets along with RAG context.
+    context = "\n\n".join([
+        f"{r.get('title', 'Source')}: {r.get('snippet', '')}"
+        for r in results
+    ])
 
     return {
         "agent": "browser",

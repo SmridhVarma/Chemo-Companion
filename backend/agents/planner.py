@@ -21,47 +21,9 @@ def analyze_intent(query: str, chat_history: Optional[list] = None) -> dict:
     Analyze user query to determine intent and extract context.
     Returns structured intent information for routing.
     """
-    if not _api_key:
-        # Fallback: simple keyword-based classification
-        return _simple_classify(query)
-
-    genai.configure(api_key=_api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
-
-    history_text = ""
-    if chat_history:
-        history_text = "\nRecent conversation:\n" + "\n".join(
-            [f"{'User' if m['role']=='user' else 'Assistant'}: {m['content'][:200]}"
-             for m in chat_history[-4:]]
-        )
-
-    prompt = f"""You are the Planner Agent for a chemotherapy companion assistant.
-Analyze this patient query and classify the intent.
-
-Query: "{query}"
-{history_text}
-
-Return a JSON object with:
-- "intent": one of ["medical_qa", "symptom_check", "medication_info", "side_effect", "lifestyle", "emotional", "general_info", "greeting"]
-- "key_entities": list of medical terms/entities mentioned
-- "urgency": "low", "medium", or "high"
-- "requires_graph": boolean — does this need knowledge graph lookup?
-- "standalone_query": REPHRASED question that includes context from history (e.g., replace "it" with "nausea"). If no history, use original query.
-
-Return ONLY valid JSON, no other text."""
-
-    try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-        return json.loads(text)
-    except Exception as e:
-        print(f"[Planner] Error: {e}")
-        return _simple_classify(query)
+    # Use keyword-based classification to conserve Gemini API quota.
+    # The Writer agent is the only one that truly needs the LLM.
+    return _simple_classify(query)
 
 
 def _simple_classify(query: str) -> dict:
