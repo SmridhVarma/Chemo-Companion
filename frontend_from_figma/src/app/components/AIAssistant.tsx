@@ -1,14 +1,25 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Mic, Plus, Menu, Moon, AlertTriangle, BookOpen, Loader2 } from 'lucide-react';
+import { Send, Mic, Plus, Menu, Moon, AlertTriangle, BookOpen, Loader2, ChevronDown, ChevronUp, FileText, Globe } from 'lucide-react';
 import imgAIRobot from "figma:asset/560d128b6eac85af1f65c399aaea62fe094353a4.png";
 
 // ── Types ────────────────────────────────────────────
+interface Citation {
+  index: number;
+  label: string;
+  url?: string;
+  page?: number;
+  type: 'web' | 'document';
+  relevance?: number;
+  snippet?: string;
+}
+
 interface Message {
   id: number;
   text: string;
   sender: 'user' | 'ai';
   timestamp: string;
   isStreaming?: boolean;
+  citations?: Citation[];
 }
 
 interface ChatHistoryEntry {
@@ -163,8 +174,9 @@ export function AIAssistant() {
             // Final result from backend: {stage: 'complete', result: {answer: '...', ...}}
             if (event.stage === 'complete' && event.result) {
               aiText = event.result.answer || '';
+              const citations = event.result.citations || [];
               setMessages(prev => prev.map(m =>
-                m.id === aiMsgId ? { ...m, text: aiText, isStreaming: false } : m
+                m.id === aiMsgId ? { ...m, text: aiText, isStreaming: false, citations } : m
               ));
             }
 
@@ -212,6 +224,7 @@ export function AIAssistant() {
           text: data.answer || 'I apologize, but I was unable to process your question. Please try again.',
           sender: 'ai',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          citations: data.citations || [],
         };
 
         // Remove any streaming placeholder and add final message
@@ -356,6 +369,11 @@ export function AIAssistant() {
                 )}
               </div>
 
+              {/* Perplexity-style Sources Dropdown */}
+              {message.sender === 'ai' && !message.isStreaming && message.citations && message.citations.length > 0 && (
+                <SourcesDropdown citations={message.citations} />
+              )}
+
               {message.sender === 'user' && message.timestamp && (
                 <div className="text-right mt-1">
                   <span className="text-xs text-gray-400">{message.timestamp}</span>
@@ -435,5 +453,92 @@ function QuickActionButton({ label, color, onClick }: { label: string; color: st
     >
       {label}
     </button>
+  );
+}
+
+function SourcesDropdown({ citations }: { citations: Citation[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const docSources = citations.filter(c => c.type === 'document');
+  const webSources = citations.filter(c => c.type === 'web');
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-indigo-600 bg-indigo-50/60 hover:bg-indigo-100/70 border border-indigo-200/40 transition-all"
+      >
+        <BookOpen className="w-3.5 h-3.5" />
+        <span>{citations.length} Source{citations.length > 1 ? 's' : ''}</span>
+        {isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 backdrop-blur-xl bg-white/60 rounded-xl border border-gray-200/50 shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200">
+          {docSources.length > 0 && (
+            <div className="p-3">
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">
+                📄 Knowledge Base
+              </div>
+              <div className="space-y-1.5">
+                {docSources.map((src) => (
+                  <div
+                    key={src.index}
+                    className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-gray-50/60 hover:bg-gray-100/60 transition-colors"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-gray-700 font-medium leading-snug truncate">
+                        {src.label}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {src.page && (
+                          <span className="text-[10px] text-gray-400">p.{src.page}</span>
+                        )}
+                        {src.relevance && src.relevance > 0 && (
+                          <span className="text-[10px] text-indigo-400">
+                            {Math.round(src.relevance * 100)}% match
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {webSources.length > 0 && (
+            <div className={`p-3 ${docSources.length > 0 ? 'border-t border-gray-200/40' : ''}`}>
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">
+                🌐 Web Sources
+              </div>
+              <div className="space-y-1.5">
+                {webSources.map((src) => (
+                  <a
+                    key={src.index}
+                    href={src.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-blue-50/40 hover:bg-blue-100/50 transition-colors group"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-gray-700 font-medium leading-snug group-hover:text-blue-600 transition-colors truncate">
+                        {src.label}
+                      </p>
+                      {src.url && (
+                        <p className="text-[10px] text-blue-400 truncate mt-0.5">
+                          {new URL(src.url).hostname}
+                        </p>
+                      )}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
