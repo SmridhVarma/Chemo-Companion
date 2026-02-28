@@ -37,7 +37,7 @@ LANGEXTRACT_MODEL = "gemini-2.5-flash"
 # ── RAG Configuration ─────────────────────────────────
 CHUNK_SIZE = 500          # tokens per chunk
 CHUNK_OVERLAP = 100       # token overlap between chunks
-TOP_K_RESULTS = 5         # number of vector search results
+TOP_K_RESULTS = 8         # number of vector search results
 RELEVANCE_THRESHOLD = 0.7 # confidence threshold for Relevance Agent
 
 # ── Verified Medical Domains (Browser Agent) ──────────
