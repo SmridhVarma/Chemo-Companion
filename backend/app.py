@@ -58,6 +58,7 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
     """
     Execute the full multi-agent pipeline:
     Planner → Lookup → Relevance → [Browser] → Writer → Citation
+    With caching at planner and full-pipeline levels.
     """
     from agents.planner import analyze_intent
     from agents.lookup import lookup
@@ -66,12 +67,26 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
     from agents.writer import synthesize_answer
     from agents.citation import enforce_citations
     from cache.faq_cache import get_faq_cache
+    from cache.pipeline_cache import get_pipeline_cache
+
+    cache = get_pipeline_cache()
+
+    # ── Full pipeline cache check (instant return for repeated queries) ──
+    cached_result = cache.get_pipeline(query)
+    if cached_result:
+        cached_result["agent_trace"] = [{"agent": "cache", "status": "pipeline_hit"}]
+        return cached_result
 
     trace = []
 
-    # Step 1: Planner — analyze intent
-    intent = analyze_intent(query, chat_history)
-    trace.append({"agent": "planner", "intent": intent.get("intent"), "urgency": intent.get("urgency")})
+    # Step 1: Planner — analyze intent (cached for 1 hour)
+    intent = cache.get_planner(query)
+    if intent:
+        trace.append({"agent": "planner", "intent": intent.get("intent"), "urgency": intent.get("urgency"), "cached": True})
+    else:
+        intent = analyze_intent(query, chat_history)
+        cache.set_planner(query, intent)
+        trace.append({"agent": "planner", "intent": intent.get("intent"), "urgency": intent.get("urgency")})
 
     # Step 2: Lookup — query internal GraphRAG
     lookup_result = lookup(query, intent)
@@ -112,7 +127,7 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
     faq_cache = get_faq_cache()
     suggestions = faq_cache.get_suggestions(intent.get("intent"))
 
-    return {
+    result = {
         "answer": final_result["answer"],
         "raw_answer": final_result.get("raw_answer", ""),
         "citations": final_result.get("citations", []),
@@ -121,6 +136,11 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
         "agent_trace": trace,
         "suggestions": suggestions,
     }
+
+    # Cache the full pipeline result
+    cache.set_pipeline(query, result)
+
+    return result
 
 
 # ── API Endpoints ──────────────────────────────────────
@@ -186,11 +206,23 @@ async def chat_stream(request: ChatRequest):
         from agents.browser_agent import search_verified_domains
         from agents.writer import synthesize_answer
         from agents.citation import enforce_citations
+        from cache.pipeline_cache import get_pipeline_cache
 
-        # Stage 1: Planning
+        cache = get_pipeline_cache()
+
+        # ── Full pipeline cache check ──
+        cached_result = cache.get_pipeline(request.query)
+        if cached_result:
+            yield f"data: {json.dumps({'stage': 'complete', 'result': cached_result})}\n\n"
+            return
+
+        # Stage 1: Planning (with cache)
         yield f"data: {json.dumps({'stage': 'planner', 'message': '🧠 Analyzing your question...'})}\n\n"
         await asyncio.sleep(0.1)
-        intent = analyze_intent(request.query, request.chat_history)
+        intent = cache.get_planner(request.query)
+        if not intent:
+            intent = analyze_intent(request.query, request.chat_history)
+            cache.set_planner(request.query, intent)
 
         # Stage 2: Lookup
         yield f"data: {json.dumps({'stage': 'lookup', 'message': '📚 Searching knowledge base...'})}\n\n"
@@ -228,13 +260,32 @@ async def chat_stream(request: ChatRequest):
         faq_cache = get_faq_cache()
         suggestions = faq_cache.get_suggestions(intent.get("intent"))
 
-        yield f"data: {json.dumps({'stage': 'complete', 'result': {'answer': final_result['answer'], 'raw_answer': final_result.get('raw_answer', ''), 'citations': final_result.get('citations', []), 'used_browser': final_result.get('used_browser', False), 'confidence': lookup_result['confidence'], 'suggestions': suggestions}})}\n\n"
+        result_payload = {
+            'answer': final_result['answer'],
+            'raw_answer': final_result.get('raw_answer', ''),
+            'citations': final_result.get('citations', []),
+            'used_browser': final_result.get('used_browser', False),
+            'confidence': lookup_result['confidence'],
+            'suggestions': suggestions,
+        }
+
+        # Cache for future requests
+        cache.set_pipeline(request.query, result_payload)
+
+        yield f"data: {json.dumps({'stage': 'complete', 'result': result_payload})}\n\n"
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+
+@app.get("/api/cache/stats")
+def cache_stats():
+    """Get pipeline cache statistics."""
+    from cache.pipeline_cache import get_pipeline_cache
+    return get_pipeline_cache().stats()
 
 
 @app.get("/api/suggestions")
