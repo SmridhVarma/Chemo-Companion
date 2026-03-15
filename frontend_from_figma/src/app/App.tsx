@@ -6,6 +6,7 @@ import { Community } from './components/Community';
 import { ClinicalHistory } from './components/ClinicalHistory';
 import { CareSchedule } from './components/CareSchedule';
 import { UserProfile } from './components/UserProfile';
+import { ToastProvider } from './components/ui/ToastNotification';
 import { Home as HomeIcon, Calendar, Users, FileText, MessageSquare, Heart, User } from 'lucide-react';
 
 type Page = 'home' | 'schedule' | 'journal' | 'community' | 'history' | 'ai' | 'profile';
@@ -35,6 +36,7 @@ export default function App() {
   };
 
   return (
+    <ToastProvider>
     <div className="min-h-screen w-full flex">
       {/* Sidebar Navigation */}
       <aside className="w-64 min-h-screen backdrop-blur-xl bg-gradient-to-b from-[rgba(224,231,255,0.8)] via-[rgba(237,233,254,0.7)] to-[rgba(219,234,254,0.6)] border-r border-white/40 shadow-xl relative">
@@ -107,6 +109,7 @@ export default function App() {
         </div>
       </main>
     </div>
+    </ToastProvider>
   );
 }
 

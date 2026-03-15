@@ -26,3 +26,5 @@ backend/debug_probe.py
 # IDE / Editor
 .vscode/
 .gemini/
+venv/
+backend/venv/

@@ -30,6 +30,14 @@ def _simple_classify(query: str) -> dict:
     """Fallback classification using keywords."""
     q = query.lower()
 
+    appointment_keywords = ["appointment", "schedule", "book", "remind", "reminder",
+                            "blood test", "check-up", "checkup", "follow-up", "followup",
+                            "doctor visit", "see dr", "meet dr", "visit doctor",
+                            "set a reminder", "add to calendar", "add to schedule",
+                            "chemo session", "radiation session", "therapy session",
+                            "scan", "mri", "ct scan", "x-ray", "lab test",
+                            "monday", "tuesday", "wednesday", "thursday",
+                            "friday", "saturday", "sunday", "tomorrow", "next week"]
     medical_keywords = ["side effect", "symptom", "pain", "nausea", "fatigue",
                         "neuropathy", "chemo", "treatment", "medication", "drug",
                         "cancer", "tumor", "radiation"]
@@ -39,7 +47,9 @@ def _simple_classify(query: str) -> dict:
                           "travel", "activity"]
 
     intent = "general_info"
-    if any(k in q for k in symptom_keywords):
+    if any(k in q for k in appointment_keywords):
+        intent = "appointment"
+    elif any(k in q for k in symptom_keywords):
         intent = "symptom_check"
     elif any(k in q for k in medical_keywords):
         intent = "medical_qa"

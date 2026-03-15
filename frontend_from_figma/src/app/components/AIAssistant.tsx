@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Mic, Plus, Menu, Moon, AlertTriangle, BookOpen, Loader2, ChevronDown, ChevronUp, FileText, Globe } from 'lucide-react';
+import { Send, Mic, Plus, Menu, Moon, AlertTriangle, BookOpen, Loader2, ChevronDown, ChevronUp, FileText, Globe, CalendarCheck, Clock } from 'lucide-react';
 import imgAIRobot from "figma:asset/560d128b6eac85af1f65c399aaea62fe094353a4.png";
+import { useToast } from './ui/ToastNotification';
 
 // ── Types ────────────────────────────────────────────
 interface Citation {
@@ -13,6 +14,13 @@ interface Citation {
   snippet?: string;
 }
 
+interface AppointmentAdded {
+  id: number;
+  title: string;
+  time: string;
+  type: string;
+}
+
 interface Message {
   id: number;
   text: string;
@@ -20,6 +28,7 @@ interface Message {
   timestamp: string;
   isStreaming?: boolean;
   citations?: Citation[];
+  appointmentsAdded?: AppointmentAdded[];
 }
 
 interface ChatHistoryEntry {
@@ -53,6 +62,7 @@ export function AIAssistant() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamStage, setStreamStage] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
+  const { showToast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -175,9 +185,20 @@ export function AIAssistant() {
             if (event.stage === 'complete' && event.result) {
               aiText = event.result.answer || '';
               const citations = event.result.citations || [];
-              setMessages(prev => prev.map(m =>
-                m.id === aiMsgId ? { ...m, text: aiText, isStreaming: false, citations } : m
-              ));
+              const appointmentsAdded: AppointmentAdded[] = event.result.appointments_added || [];
+
+              if (appointmentsAdded.length > 0) {
+                // Appointment detected: suppress chat text, show toast notifications
+                setMessages(prev => prev.filter(m => m.id !== aiMsgId));
+                for (const apt of appointmentsAdded) {
+                  showToast(`✅ Added to Care Schedule: ${apt.title}`, 'success');
+                }
+              } else {
+                // Normal response: show text in chat
+                setMessages(prev => prev.map(m =>
+                  m.id === aiMsgId ? { ...m, text: aiText, isStreaming: false, citations } : m
+                ));
+              }
             }
 
             // Direct answer (fallback for other formats)
@@ -193,13 +214,9 @@ export function AIAssistant() {
         if (done) break;
       }
 
-      // Finalize AI message
+      // Finalize: update chat history (only if a normal text response was kept)
       if (aiText) {
-        setMessages(prev => prev.map(m =>
-          m.id === aiMsgId ? { ...m, text: aiText, isStreaming: false } : m
-        ));
-
-        // Update chat history for context retention
+        // Only update history; the message was already handled above
         setChatHistory([
           ...historyForAPI,
           { role: 'assistant', content: aiText },
@@ -219,19 +236,29 @@ export function AIAssistant() {
         });
 
         const data = await response.json();
-        const aiMsg: Message = {
-          id: Date.now() + 1,
-          text: data.answer || 'I apologize, but I was unable to process your question. Please try again.',
-          sender: 'ai',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          citations: data.citations || [],
-        };
+        const appointmentsAdded: AppointmentAdded[] = data.appointments_added || [];
 
-        // Remove any streaming placeholder and add final message
-        setMessages(prev => {
-          const withoutPlaceholder = prev.filter(m => !m.isStreaming);
-          return [...withoutPlaceholder, aiMsg];
-        });
+        if (appointmentsAdded.length > 0) {
+          // Appointment detected: suppress chat text, show toast notifications
+          setMessages(prev => prev.filter(m => !m.isStreaming));
+          for (const apt of appointmentsAdded) {
+            showToast(`✅ Added to Care Schedule: ${apt.title}`, 'success');
+          }
+        } else {
+          const aiMsg: Message = {
+            id: Date.now() + 1,
+            text: data.answer || 'I apologize, but I was unable to process your question. Please try again.',
+            sender: 'ai',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            citations: data.citations || [],
+          };
+
+          // Remove any streaming placeholder and add final message
+          setMessages(prev => {
+            const withoutPlaceholder = prev.filter(m => !m.isStreaming);
+            return [...withoutPlaceholder, aiMsg];
+          });
+        }
 
         setChatHistory([
           ...historyForAPI,
@@ -239,15 +266,8 @@ export function AIAssistant() {
         ]);
 
       } catch {
-        setMessages(prev => {
-          const withoutPlaceholder = prev.filter(m => !m.isStreaming);
-          return [...withoutPlaceholder, {
-            id: Date.now() + 1,
-            text: "I'm sorry, I'm having trouble connecting right now. Please make sure the backend server is running and try again.",
-            sender: 'ai',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }];
-        });
+        setMessages(prev => prev.filter(m => !m.isStreaming));
+        showToast('❌ Could not connect to server. Please try again.', 'error');
       }
     } finally {
       setIsLoading(false);
@@ -374,6 +394,8 @@ export function AIAssistant() {
                 <SourcesDropdown citations={message.citations} />
               )}
 
+
+
               {message.sender === 'user' && message.timestamp && (
                 <div className="text-right mt-1">
                   <span className="text-xs text-gray-400">{message.timestamp}</span>
@@ -453,6 +475,55 @@ function QuickActionButton({ label, color, onClick }: { label: string; color: st
     >
       {label}
     </button>
+  );
+}
+
+function AppointmentConfirmation({ appointments }: { appointments: AppointmentAdded[] }) {
+  const formatDateTime = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) +
+        ' at ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return isoStr;
+    }
+  };
+
+  const typeEmoji: Record<string, string> = {
+    doctor_visit: '🏥',
+    medication: '💊',
+    lab_test: '🩸',
+    treatment: '💉',
+    wellness: '🧘',
+  };
+
+  return (
+    <div className="mt-3 space-y-2">
+      {appointments.map((apt) => (
+        <div
+          key={apt.id}
+          className="backdrop-blur-md bg-gradient-to-r from-emerald-50/80 to-teal-50/70 rounded-2xl p-4 border border-emerald-200/60 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
+        >
+          <div className="flex items-start gap-3">
+            <div className="backdrop-blur-md bg-emerald-100/80 p-2.5 rounded-xl shadow border border-white/60 flex-shrink-0">
+              <CalendarCheck className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-bold text-emerald-700 uppercase tracking-wide">✅ Added to Care Schedule</span>
+              </div>
+              <h4 className="font-semibold text-gray-800 text-sm">
+                {typeEmoji[apt.type] || '📅'} {apt.title}
+              </h4>
+              <div className="flex items-center gap-1.5 mt-1 text-emerald-600">
+                <Clock className="w-3.5 h-3.5" />
+                <span className="text-xs font-medium">{formatDateTime(apt.time)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

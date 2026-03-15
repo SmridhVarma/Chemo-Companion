@@ -4,6 +4,7 @@ Main API server orchestrating the multi-agent pipeline.
 """
 import json
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -31,8 +32,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+MOCK_APPOINTMENTS = [
+    {"id": 1, "title": "Take anti-nausea medication", "time": "2026-03-15T08:00:00", "type": "medication"},
+    {"id": 2, "title": "Check-up with Dr. Nam", "time": "2026-03-16T10:30:00", "type": "doctor_visit"}
+]
+
 
 # ── Request/Response Models ────────────────────────────
+class Appointment(BaseModel):
+    id: Optional[int] = None
+    title: str
+    time: str  # Format: ISO string or "YYYY-MM-DD HH:mm"
+    type: str  # 'medication' or 'doctor_visit'
 
 class ChatRequest(BaseModel):
     query: str
@@ -46,6 +57,7 @@ class ChatResponse(BaseModel):
     confidence: float = 0.0
     agent_trace: list = []
     suggestions: list = []
+    appointments_added: list = []
 
 class GraphQueryRequest(BaseModel):
     entity: str
@@ -127,6 +139,9 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
     faq_cache = get_faq_cache()
     suggestions = faq_cache.get_suggestions(intent.get("intent"))
 
+    # Step 7: Appointment extraction (runs in parallel with response)
+    appointments_added = _try_extract_appointments(query, intent)
+
     result = {
         "answer": final_result["answer"],
         "raw_answer": final_result.get("raw_answer", ""),
@@ -135,12 +150,47 @@ def run_agent_pipeline(query: str, chat_history: Optional[list] = None) -> dict:
         "confidence": lookup_result["confidence"],
         "agent_trace": trace,
         "suggestions": suggestions,
+        "appointments_added": appointments_added,
+        "appointment_only": len(appointments_added) > 0,
     }
 
     # Cache the full pipeline result
     cache.set_pipeline(query, result)
 
     return result
+
+
+def _try_extract_appointments(query: str, intent: dict) -> list:
+    """Attempt to extract and save appointments from user query."""
+    # Only run extractor if the intent looks like scheduling
+    if intent.get("intent") != "appointment":
+        return []
+
+    try:
+        from agents.appointment_extractor import extract_appointments
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        extraction = extract_appointments(query, current_time=now)
+
+        if not extraction.get("has_appointment"):
+            return []
+
+        saved = []
+        for apt in extraction.get("appointments", []):
+            new_id = len(MOCK_APPOINTMENTS) + 1
+            new_data = {
+                "id": new_id,
+                "title": apt["title"],
+                "time": apt["time"],
+                "type": apt.get("type", "doctor_visit"),
+            }
+            MOCK_APPOINTMENTS.append(new_data)
+            saved.append(new_data)
+            print(f"[Auto-Schedule] Saved: {new_data['title']} at {new_data['time']}")
+
+        return saved
+    except Exception as e:
+        print(f"[Auto-Schedule] Extraction failed: {e}")
+        return []
 
 
 # ── API Endpoints ──────────────────────────────────────
@@ -260,6 +310,11 @@ async def chat_stream(request: ChatRequest):
         faq_cache = get_faq_cache()
         suggestions = faq_cache.get_suggestions(intent.get("intent"))
 
+        # Extract appointments from the query if scheduling intent detected
+        from agents.planner import _simple_classify
+        intent_info = _simple_classify(request.query)
+        appointments_added = _try_extract_appointments(request.query, intent_info)
+
         result_payload = {
             'answer': final_result['answer'],
             'raw_answer': final_result.get('raw_answer', ''),
@@ -267,6 +322,8 @@ async def chat_stream(request: ChatRequest):
             'used_browser': final_result.get('used_browser', False),
             'confidence': lookup_result['confidence'],
             'suggestions': suggestions,
+            'appointments_added': appointments_added,
+            'appointment_only': len(appointments_added) > 0,
         }
 
         # Cache for future requests
@@ -339,6 +396,34 @@ def get_sources():
         "total": len(pdfs),
     }
 
+# ── Appointment Endpoints (FR 3) ──────────────────────
+
+@app.get("/api/appointments", response_model=dict)
+def get_appointments():
+    """Fetch the list of appointments to display on the Frontend Dashboard."""
+    return {"status": "success", "data": MOCK_APPOINTMENTS}
+
+@app.post("/api/appointments")
+def add_appointment(apt: Appointment):
+    """Add a new appointment (Used for both manual entry and AI extraction)."""
+    new_id = len(MOCK_APPOINTMENTS) + 1
+    new_data = apt.dict()
+    new_data["id"] = new_id
+    MOCK_APPOINTMENTS.append(new_data)
+    
+    print(f"[Internal] Added new {apt.type}: {apt.title} at {apt.time}")
+    return {"status": "success", "data": new_data, "message": "Appointment has been saved."}
+
+@app.delete("/api/appointments/{appointment_id}")
+def delete_appointment(appointment_id: int):
+    """Delete an appointment by ID."""
+    global MOCK_APPOINTMENTS
+    original_len = len(MOCK_APPOINTMENTS)
+    MOCK_APPOINTMENTS = [a for a in MOCK_APPOINTMENTS if a["id"] != appointment_id]
+    if len(MOCK_APPOINTMENTS) == original_len:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return {"status": "success", "message": "Appointment deleted."}
+
 
 # ── Data Ingestion Endpoints (Admin) ──────────────────
 
@@ -370,7 +455,6 @@ def run_graph_build():
         "nodes": G.number_of_nodes(),
         "edges": G.number_of_edges(),
     }
-
 
 # ── Static File Serving (React Frontend) ─────────────
 

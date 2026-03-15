@@ -1,18 +1,112 @@
-import { useState } from 'react';
-import { ArrowLeft, Bell, Mic, Plus, Calendar, Users, MapPin, Check, Video, Clock, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ArrowLeft, Bell, Mic, Plus, Calendar, Users, MapPin, Check, Video, Clock, X, Trash2, RefreshCw } from 'lucide-react';
 import imgAppointment from "figma:asset/8669c136a244f7227f342ed23bd2000cc314c451.png";
 
-export function CareSchedule() {
-  const [selectedDate, setSelectedDate] = useState(16);
-  const [showBookingModal, setShowBookingModal] = useState(false);
+interface ApiAppointment {
+  id: number;
+  title: string;
+  time: string;
+  type: string;
+}
 
-  const dates = [
-    { day: 'Mon', date: 16, hasEvent: true },
-    { day: 'Tue', date: 17, hasEvent: false },
-    { day: 'Wed', date: 18, hasEvent: true },
-    { day: 'Thu', date: 19, hasEvent: false },
-    { day: 'Fri', date: 20, hasEvent: true },
-  ];
+export function CareSchedule() {
+  const [selectedDate, setSelectedDate] = useState(new Date().getDate());
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchAppointments = useCallback(async () => {
+    try {
+      const res = await fetch('/api/appointments');
+      const data = await res.json();
+      if (data.status === 'success') {
+        setAppointments(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch appointments:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch on mount + auto-refresh every 30s
+  useEffect(() => {
+    fetchAppointments();
+    const interval = setInterval(fetchAppointments, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAppointments]);
+
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/appointments/${id}`, { method: 'DELETE' });
+      setAppointments(prev => prev.filter(a => a.id !== id));
+    } catch (err) {
+      console.error('Failed to delete appointment:', err);
+    }
+  };
+
+  // Map API types to card visual styles
+  const mapType = (type: string): 'chemotherapy' | 'lab' | 'wellness' => {
+    switch (type) {
+      case 'medication':
+      case 'treatment':
+        return 'chemotherapy';
+      case 'lab_test':
+        return 'lab';
+      case 'wellness':
+        return 'wellness';
+      case 'doctor_visit':
+      default:
+        return 'lab';
+    }
+  };
+
+  const formatTime = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch {
+      return isoStr;
+    }
+  };
+
+  const formatDate = (isoStr: string) => {
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch {
+      return '';
+    }
+  };
+
+  // Dynamically generate current week's dates, synced to real time
+  const { dates, calendarLabel } = useMemo(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ...
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + mondayOffset);
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekDates = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateNum = d.getDate();
+      // Check if any appointment falls on this date
+      const hasEvent = appointments.some(apt => {
+        try {
+          const aptDate = new Date(apt.time);
+          return aptDate.getFullYear() === d.getFullYear() &&
+                 aptDate.getMonth() === d.getMonth() &&
+                 aptDate.getDate() === d.getDate();
+        } catch { return false; }
+      });
+      return { day: dayNames[d.getDay()], date: dateNum, fullDate: d, hasEvent };
+    });
+
+    const label = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    return { dates: weekDates, calendarLabel: label };
+  }, [appointments]);
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
@@ -24,9 +118,18 @@ export function CareSchedule() {
           </button>
           <h1 className="text-3xl font-serif text-gray-800">Care Schedule</h1>
         </div>
-        <button className="backdrop-blur-md bg-white/70 p-3 rounded-xl shadow border border-white/60 hover:bg-white/90 transition-all">
-          <Bell className="w-5 h-5 text-gray-600" />
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={fetchAppointments}
+            className="backdrop-blur-md bg-white/70 p-3 rounded-xl shadow border border-white/60 hover:bg-white/90 transition-all"
+            title="Refresh"
+          >
+            <RefreshCw className="w-5 h-5 text-gray-600" />
+          </button>
+          <button className="backdrop-blur-md bg-white/70 p-3 rounded-xl shadow border border-white/60 hover:bg-white/90 transition-all">
+            <Bell className="w-5 h-5 text-gray-600" />
+          </button>
+        </div>
       </div>
 
       {/* Cycle Countdown */}
@@ -73,7 +176,7 @@ export function CareSchedule() {
         
         <div className="relative">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-serif text-gray-800">October 2023</h3>
+            <h3 className="text-xl font-serif text-gray-800">{calendarLabel}</h3>
             <button className="text-sm text-purple-600 font-medium hover:underline">
               View All
             </button>
@@ -107,7 +210,45 @@ export function CareSchedule() {
         </div>
       </div>
 
-      {/* Today's Schedule */}
+      {/* Your Appointments (from API) */}
+      <div className="backdrop-blur-xl bg-white/70 rounded-3xl p-6 shadow-xl border border-white/60 mb-8 relative overflow-hidden">
+        <div className="absolute bottom-0 right-0 w-32 h-32 bg-purple-200/20 rounded-full blur-2xl" />
+        
+        <div className="relative">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-serif text-gray-800">Your Appointments</h3>
+            <span className="text-sm text-gray-500 font-medium">
+              {appointments.length} total
+            </span>
+          </div>
+          
+          {isLoading ? (
+            <div className="text-center py-8 text-gray-500">Loading appointments...</div>
+          ) : appointments.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-gray-500 mb-2">No appointments yet</p>
+              <p className="text-sm text-gray-400">Chat with the AI Assistant to add appointments automatically!</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {appointments.map((apt) => (
+                <AppointmentCard
+                  key={apt.id}
+                  type={mapType(apt.type)}
+                  title={apt.title}
+                  location={formatDate(apt.time)}
+                  time={formatTime(apt.time)}
+                  attendees={[]}
+                  status="upcoming"
+                  onDelete={() => handleDelete(apt.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Today's Schedule (hardcoded demo) */}
       <div className="backdrop-blur-xl bg-white/70 rounded-3xl p-6 shadow-xl border border-white/60 mb-8 relative overflow-hidden">
         <div className="absolute bottom-0 right-0 w-32 h-32 bg-purple-200/20 rounded-full blur-2xl" />
         
@@ -174,9 +315,10 @@ interface AppointmentCardProps {
   attendees?: Array<{ name: string; color: string }>;
   hasVideo?: boolean;
   status: 'upcoming' | 'completed';
+  onDelete?: () => void;
 }
 
-function AppointmentCard({ type, title, location, time, attendees = [], hasVideo, status }: AppointmentCardProps) {
+function AppointmentCard({ type, title, location, time, attendees = [], hasVideo, status, onDelete }: AppointmentCardProps) {
   const typeConfig = {
     chemotherapy: {
       icon: '💉',
@@ -231,6 +373,15 @@ function AppointmentCard({ type, title, location, time, attendees = [], hasVideo
                 <div className="backdrop-blur-md bg-emerald-100/80 p-2 rounded-lg shadow border border-white/60">
                   <Check className="w-4 h-4 text-emerald-600" />
                 </div>
+              )}
+              {onDelete && (
+                <button
+                  onClick={onDelete}
+                  className="backdrop-blur-md bg-red-50/80 hover:bg-red-100/80 p-2 rounded-lg shadow border border-red-200/60 transition-all hover:scale-105"
+                  title="Remove appointment"
+                >
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                </button>
               )}
             </div>
 
