@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -16,6 +16,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import GRAPH_DIR
+
+# ── AAC & Peer Matching (FR 6) ─────────────────────────
+from knowledge.matcher import calculate_recovery_score, find_similar_peers, recommend_aac_activities
+from knowledge.graph_builder import build_graph
+
+# Load the Knowledge Graph once at startup
+G = build_graph()
 
 app = FastAPI(
     title="Chemo Companion API",
@@ -177,6 +184,46 @@ def chat(request: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/peers/match")
+async def match_peers(request: Request):
+    """Find similar peers for a patient."""
+    try:
+        data = await request.json()
+        patient_id = data.get("patient_id")
+        
+        # In a real app, we'd look up the patient's interests and status
+        # For now, we use the graph traversal logic in matcher.py
+        peers = find_similar_peers(G, patient_id)
+        
+        return {
+            "peers": peers,
+            "count": len(peers),
+            "status": "success"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/aac/recommend")
+async def recommend_activities(request: Request):
+    """Recommend AAC activities based on recovery score and interests."""
+    try:
+        data = await request.json()
+        age = data.get("age", 60)
+        current_rmssd = data.get("rmssd", 25.0)
+        interests = data.get("interests", [])
+        
+        recovery_score = calculate_recovery_score(age, current_rmssd)
+        activities = recommend_aac_activities(recovery_score, interests)
+        
+        return {
+            "recovery_score": recovery_score,
+            "activities": activities,
+            "count": len(activities),
+            "status": "success"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
@@ -317,9 +364,9 @@ def get_graph():
 @app.post("/api/graph/query")
 def query_graph_endpoint(request: GraphQueryRequest):
     """Query specific graph relationships."""
-    from knowledge.graph_builder import load_graph, query_graph
+    from knowledge.graph_builder import query_graph # load_graph is now global
     try:
-        G = load_graph()
+        # G is already loaded globally
         result = query_graph(G, request.entity, request.depth)
         return result
     except FileNotFoundError:

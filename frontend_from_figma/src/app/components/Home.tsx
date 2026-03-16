@@ -1,22 +1,86 @@
 import imgDailyCheckIn from "figma:asset/c37608e0639d481199161f86f938cbb87cfa2de8.png";
-import { Heart, Droplet, Pill, Calendar, Plus } from 'lucide-react';
+import { Heart, Droplet, Pill, Calendar, Plus, Zap, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+
+interface Activity {
+  id: string;
+  name: string;
+  description: string;
+  energy_req: number;
+}
 
 export function Home() {
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [recoveryScore, setRecoveryScore] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchHomeData = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const stored = localStorage.getItem('chemo_companion_profile');
+      const profile = stored ? JSON.parse(stored) : null;
+      
+      const age = profile?.age ? parseInt(profile.age) : 60;
+      const rmssd = profile?.currentRMSSD ? parseFloat(profile.currentRMSSD) : 25.0;
+      const interests = profile?.interests || [];
+
+      const response = await fetch('/api/aac/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ age, rmssd, interests })
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      const data = await response.json();
+      setActivities(data.activities?.slice(0, 5) || []);
+      setRecoveryScore(data.recovery_score);
+    } catch (err: any) {
+      console.error("Error fetching home data:", err);
+      setError(err?.message || "Could not connect to the recommendation engine.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHomeData();
+    // Re-fetch when user navigates back to this tab/page
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') fetchHomeData();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       {/* Header */}
       <header className="mb-8">
         <div className="backdrop-blur-xl bg-white/70 rounded-3xl p-8 shadow-2xl border border-white/60 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-indigo-100/20 via-purple-100/20 to-blue-100/20" />
-          <div className="relative">
-            <h2 className="text-3xl font-serif text-gray-800 mb-2">
-              Welcome back,
-            </h2>
-            <h3 className="text-2xl font-serif text-[#6366F1] mb-3">
-              how are you feeling today?
-            </h3>
-            <p className="text-gray-600">Let's check in on your journey together.</p>
-          </div>
+            <div className="relative flex justify-between items-start">
+              <div>
+                <h2 className="text-3xl font-serif text-gray-800 mb-2">
+                  Welcome back,
+                </h2>
+                <h3 className="text-2xl font-serif text-[#6366F1] mb-3">
+                  how are you feeling today?
+                </h3>
+                <p className="text-gray-600">Let's check in on your journey together.</p>
+              </div>
+              
+              {recoveryScore !== null && (
+                <div className="backdrop-blur-md bg-white/60 p-4 rounded-2xl border border-indigo-100 shadow-lg flex flex-col items-center animate-in fade-in zoom-in duration-500">
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1">Recovery Score</span>
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-amber-500 fill-amber-500" />
+                    <span className="text-2xl font-bold text-gray-800">{Math.round(recoveryScore)}%</span>
+                  </div>
+                  <span className="text-[9px] text-gray-400 mt-1">Based on HRV trend</span>
+                </div>
+              )}
+            </div>
         </div>
       </header>
 
@@ -116,23 +180,27 @@ export function Home() {
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-200/20 rounded-full blur-2xl" />
           
           <div className="relative">
-            <h3 className="text-xl font-serif text-gray-800 mb-6">Today's Schedule</h3>
+            <h3 className="text-xl font-serif text-gray-800 mb-6">Personalized Recommendations</h3>
             
-            <div className="space-y-3">
-              <ScheduleItem
-                icon={Pill}
-                time="10:00 AM"
-                title="Morning Medication"
-                color="indigo"
-              />
-              <ScheduleItem
-                icon={Droplet}
-                time="ALL DAY"
-                title="Hydration Goal"
-                subtitle="4 of 8 glasses"
-                color="blue"
-              />
-            </div>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+              </div>
+            ) : error ? (
+              <div className="p-4 bg-red-50/60 rounded-2xl border border-red-200/50 text-center space-y-2">
+                <p className="text-sm text-red-600">⚠️ {error}</p>
+                <p className="text-xs text-gray-500">Make sure the backend server is running on port 8000.</p>
+                <button onClick={fetchHomeData} className="mt-2 px-4 py-1.5 text-xs font-medium rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 transition-all">
+                  Retry
+                </button>
+              </div>
+            ) : activities.length > 0 ? (
+              <ActivityCarousel activities={activities} />
+            ) : (
+              <div className="p-4 bg-white/40 rounded-2xl border border-white/50 text-center">
+                <p className="text-sm text-gray-500">Log your interests in "My Profile" for personalized center activities.</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -158,6 +226,65 @@ export function Home() {
           color="blue"
         />
       </div>
+    </div>
+  );
+}
+
+function ActivityCarousel({ activities }: { activities: Activity[] }) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const nextSlide = () => {
+    setCurrentIndex((prevIndex) => (prevIndex + 1) % activities.length);
+  };
+
+  const prevSlide = () => {
+    setCurrentIndex((prevIndex) => (prevIndex - 1 + activities.length) % activities.length);
+  };
+
+  const currentActivity = activities[currentIndex];
+
+  return (
+    <div className="relative group">
+      <div className="overflow-hidden rounded-2xl">
+        <div 
+          className="transition-transform duration-500 ease-out"
+          key={currentActivity.id}
+        >
+          <ScheduleItem
+            icon={Heart}
+            time={`RECOMMENDED ${currentIndex + 1}/${activities.length}`}
+            title={currentActivity.name}
+            subtitle={currentActivity.description}
+            color="indigo"
+          />
+        </div>
+      </div>
+
+      {activities.length > 1 && (
+        <>
+          <button 
+            onClick={prevSlide}
+            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-4 backdrop-blur-md bg-white/70 p-2 rounded-full shadow-lg border border-white/60 text-gray-600 hover:bg-white transition-all opacity-0 group-hover:opacity-100 z-10"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={nextSlide}
+            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-4 backdrop-blur-md bg-white/70 p-2 rounded-full shadow-lg border border-white/60 text-gray-600 hover:bg-white transition-all opacity-0 group-hover:opacity-100 z-10"
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          
+          <div className="flex justify-center gap-1.5 mt-4">
+            {activities.map((_, i) => (
+              <div 
+                key={i}
+                className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentIndex ? 'bg-indigo-500 w-3' : 'bg-gray-300'}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

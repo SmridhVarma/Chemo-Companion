@@ -11,6 +11,7 @@ import networkx as nx
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import ENTITIES_DIR, GRAPH_DIR
+from knowledge.aac_data import MOCK_PEERS, AAC_ACTIVITIES
 
 
 def build_graph(entities_file: Optional[Path] = None) -> nx.DiGraph:
@@ -20,8 +21,12 @@ def build_graph(entities_file: Optional[Path] = None) -> nx.DiGraph:
     """
     entities_file = entities_file or (ENTITIES_DIR / "all_entities.json")
 
-    with open(entities_file, "r", encoding="utf-8") as f:
-        all_results = json.load(f)
+    all_results = []
+    if entities_file.exists():
+        with open(entities_file, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+    else:
+        print(f"[Graph Builder] No entities file found at {entities_file}. Starting with empty graph.")
 
     G = nx.DiGraph()
 
@@ -74,6 +79,53 @@ def build_graph(entities_file: Optional[Path] = None) -> nx.DiGraph:
                         "sources": [source_pdf],
                     })
 
+    # --- Add AAC & Peer Data ---
+    # Add AAC Activities
+    for activity in AAC_ACTIVITIES:
+        act_id = activity["id"]
+        G.add_node(act_id, **{
+            "label": activity["name"],
+            "type": "AAC_ACTIVITY",
+            "energy_req": activity["energy_req"],
+            "interests": activity["interests"],
+            "description": activity["description"],
+            "sources": ["AAC_CATALOG"],
+            "frequency": 1
+        })
+        
+        # Link activity to interests
+        for interest in activity["interests"]:
+            int_id = interest.lower().strip()
+            if not G.has_node(int_id):
+                G.add_node(int_id, label=interest, type="INTEREST", sources=["AAC_CATALOG"], frequency=1)
+            G.add_edge(act_id, int_id, relation="HAS_INTEREST", weight=1, sources=["AAC_CATALOG"])
+
+    # Add Mock Peers
+    for peer in MOCK_PEERS:
+        peer_id = peer["id"]
+        G.add_node(peer_id, **{
+            "label": peer["name"],
+            "type": "PATIENT",
+            "age": peer["age"],
+            "cancer_type": peer["cancer_type"],
+            "recovery_score": peer["recovery_score"],
+            "interests": peer["interests"],
+            "sources": ["PEER_DB"],
+            "frequency": 1
+        })
+        
+        # Link peer to interests
+        for interest in peer["interests"]:
+            int_id = interest.lower().strip()
+            if not G.has_node(int_id):
+                G.add_node(int_id, label=interest, type="INTEREST", sources=["PEER_DB"], frequency=1)
+            G.add_edge(peer_id, int_id, relation="INTERESTED_IN", weight=1, sources=["PEER_DB"])
+            
+        # Link peer to cancer type
+        cancer_id = peer["cancer_type"].lower() + " cancer"
+        if G.has_node(cancer_id):
+            G.add_edge(peer_id, cancer_id, relation="HAS_CONDITION", weight=1, sources=["PEER_DB"])
+
     print(f"[Graph Builder] Built graph: {G.number_of_nodes()} nodes, "
           f"{G.number_of_edges()} edges")
 
@@ -116,15 +168,17 @@ def save_graph(G: nx.DiGraph, output_dir: Optional[Path] = None):
     # Save as GraphML (for NetworkX reload)
     # Need to convert non-serializable attributes
     G_export = G.copy()
-    for node_id in G_export.nodes():
-        sources = G_export.nodes[node_id].get("sources", [])
-        if sources and isinstance(sources[0], dict):
-            G_export.nodes[node_id]["sources"] = json.dumps(sources)
-        elif isinstance(sources, list):
-            G_export.nodes[node_id]["sources"] = json.dumps(sources)
-    for u, v in G_export.edges():
-        sources = G_export.edges[u, v].get("sources", [])
-        G_export.edges[u, v]["sources"] = json.dumps(sources)
+    # Need to convert non-serializable attributes
+    G_export = G.copy()
+    for node_id, node_data in G_export.nodes(data=True):
+        for attr, value in node_data.items():
+            if isinstance(value, list):
+                G_export.nodes[node_id][attr] = json.dumps(value)
+    
+    for u, v, edge_data in G_export.edges(data=True):
+        for attr, value in edge_data.items():
+            if isinstance(value, list):
+                G_export.edges[u, v][attr] = json.dumps(value)
 
     nx.write_graphml(G_export, str(output_dir / "knowledge_graph.graphml"))
 
