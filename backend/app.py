@@ -326,6 +326,86 @@ def query_graph_endpoint(request: GraphQueryRequest):
         return {"entity": request.entity, "found": False, "message": "Graph not built yet."}
 
 
+# ── MerLION Audio Endpoints ──────────────────────────
+
+from fastapi import File, UploadFile
+
+@app.post("/api/audio/transcribe", response_model=ChatResponse)
+async def audio_transcribe(file: UploadFile = File(...)):
+    """
+    Accept an audio file, transcribe via MerLION, then run the text
+    through the existing multi-agent pipeline (Gemini Writer).
+    Returns the same ChatResponse as /api/chat.
+    """
+    from agents.merlion_client import transcribe_audio
+    from safety import check_safety
+
+    # Validate file type (strip codec params like "audio/webm;codecs=opus" → "audio/webm")
+    allowed_types = {"audio/wav", "audio/mpeg", "audio/flac", "audio/mp4",
+                     "audio/webm", "audio/ogg", "audio/x-wav"}
+    content_type = file.content_type or "audio/wav"
+    base_type = content_type.split(";")[0].strip()
+    if base_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported audio format: {content_type}. Supported: wav, mp3, flac, m4a, webm"
+        )
+
+    try:
+        # Read audio bytes
+        audio_bytes = await file.read()
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+
+        filename = file.filename or "recording.wav"
+        print(f"[Audio] Received {filename} ({len(audio_bytes)} bytes, {content_type})")
+
+        # Step 1: Transcribe via MerLION
+        transcribed_text = transcribe_audio(audio_bytes, filename, content_type)
+
+        if not transcribed_text or not transcribed_text.strip():
+            return ChatResponse(
+                answer="I couldn't understand the audio. Could you please try again or type your question?",
+                confidence=0.0,
+                agent_trace=[{"agent": "merlion", "status": "empty_transcription"}],
+            )
+
+        # Step 2: Safety check on transcribed text
+        is_safe, warning = check_safety(transcribed_text)
+        if not is_safe:
+            return ChatResponse(
+                answer=warning,
+                raw_answer=warning,
+                confidence=1.0,
+                agent_trace=[
+                    {"agent": "merlion", "status": "transcribed", "text": transcribed_text},
+                    {"agent": "guardrail", "status": "blocked"},
+                ],
+            )
+
+        # Step 3: Run through existing pipeline
+        result = run_agent_pipeline(transcribed_text)
+
+        # Prepend non-blocking warnings
+        if warning:
+            result["answer"] = f"{warning}\n\n{result['answer']}"
+
+        # Add MerLION trace info
+        result.setdefault("agent_trace", []).insert(0, {
+            "agent": "merlion",
+            "status": "transcribed",
+            "transcribed_text": transcribed_text,
+        })
+
+        return ChatResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Audio] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
+
+
 @app.get("/api/sources")
 def get_sources():
     """List all indexed source documents."""
