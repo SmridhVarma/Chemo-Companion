@@ -53,8 +53,11 @@ export function AIAssistant() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamStage, setStreamStage] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -65,6 +68,117 @@ export function AIAssistant() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+  const handleVoiceRecord = async () => {
+    if (isLoading) return;
+
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    // Start recording
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg',
+      });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach(t => t.stop());
+
+        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (audioBlob.size === 0) return;
+
+        setIsLoading(true);
+        setStreamStage('🎤 Transcribing your voice...');
+
+        // Add a placeholder user message
+        const userMsgId = Date.now();
+        setMessages(prev => [...prev, {
+          id: userMsgId,
+          text: '🎤 Voice message...',
+          sender: 'user',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+
+        try {
+          const ext = mimeType.includes('webm') ? 'webm' : 'ogg';
+          const formData = new FormData();
+          formData.append('file', audioBlob, `recording.${ext}`);
+
+          const response = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({ detail: 'Audio processing failed' }));
+            throw new Error(errData.detail || `Server error: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Extract the transcribed text from agent trace
+          const merlionTrace = data.agent_trace?.find((t: Record<string, string>) => t.agent === 'merlion');
+          const transcribedText = merlionTrace?.transcribed_text || '🎤 Voice query';
+
+          // Update user message with transcribed text
+          setMessages(prev => prev.map(m =>
+            m.id === userMsgId ? { ...m, text: transcribedText } : m
+          ));
+
+          // Add AI response
+          const aiMsg: Message = {
+            id: Date.now() + 1,
+            text: data.answer || 'I apologize, I could not process your voice message.',
+            sender: 'ai',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            citations: data.citations || [],
+          };
+          setMessages(prev => [...prev, aiMsg]);
+
+          // Update chat history
+          setChatHistory(prev => [
+            ...prev,
+            { role: 'user', content: transcribedText },
+            { role: 'assistant', content: data.answer || '' },
+          ]);
+
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : 'Voice processing failed';
+          setMessages(prev => {
+            const updated = prev.map(m =>
+              m.id === userMsgId ? { ...m, text: '🎤 Voice message (failed to process)' } : m
+            );
+            return [...updated, {
+              id: Date.now() + 1,
+              text: `I'm sorry, I couldn't process your voice message. ${errMsg}. Please try again or type your question.`,
+              sender: 'ai' as const,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }];
+          });
+        } finally {
+          setIsLoading(false);
+          setStreamStage('');
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      alert('Could not access your microphone. Please check your browser permissions.');
+    }
+  };
 
   const handleSend = async (customQuery?: string) => {
     const query = customQuery || inputText.trim();
@@ -417,8 +531,16 @@ export function AIAssistant() {
               disabled={isLoading}
               className="flex-1 bg-transparent border-none outline-none text-gray-800 placeholder-gray-400 disabled:opacity-50"
             />
-            <button className="p-2 hover:bg-white/60 rounded-lg transition-all">
-              <Mic className="w-5 h-5 text-gray-500" />
+            <button
+              onClick={handleVoiceRecord}
+              disabled={isLoading && !isRecording}
+              className={`p-2 rounded-lg transition-all ${isRecording
+                  ? 'bg-red-100 hover:bg-red-200 animate-pulse'
+                  : 'hover:bg-white/60'
+                }`}
+              title={isRecording ? 'Stop recording' : 'Record voice message'}
+            >
+              <Mic className={`w-5 h-5 ${isRecording ? 'text-red-500' : 'text-gray-500'}`} />
             </button>
           </div>
 

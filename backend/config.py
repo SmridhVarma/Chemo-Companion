@@ -28,6 +28,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "")
 GOOGLE_CSE_ENGINE_ID = os.getenv("GOOGLE_CSE_ENGINE_ID", "")
+MERLION_API_KEY = os.getenv("MERLION_API_KEY", "")
+MERLION_BASE_URL = "https://api.cr8lab.com"
 
 # ── Model Configuration ───────────────────────────────
 EMBEDDING_MODEL = "pritamdeka/S-PubMedBert-MS-MARCO"
