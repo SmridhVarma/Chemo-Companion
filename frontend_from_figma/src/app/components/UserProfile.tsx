@@ -11,6 +11,8 @@ interface UserProfileData {
     allergies: string[];
     conditions: string[];
     dietaryRestrictions: string[];
+    interests: string[];
+    currentRMSSD: string;
     appointments: Appointment[];
 }
 
@@ -33,8 +35,18 @@ const defaultProfile: UserProfileData = {
     allergies: [],
     conditions: [],
     dietaryRestrictions: [],
+    interests: [],
+    currentRMSSD: '25',
     appointments: [],
 };
+
+const SUGGESTED_INTERESTS = [
+    "Gardening", "Nature", "Outdoors", 
+    "Yoga", "Wellness", "Mindfulness", 
+    "Art", "Painting", "Creativity", 
+    "Walking", "Social", 
+    "Cooking", "Nutrition", "Health"
+];
 
 // ── Component ────────────────────────────────────────
 export function UserProfile() {
@@ -58,14 +70,16 @@ export function UserProfile() {
         setTimeout(() => setSaved(false), 2000);
     };
 
-    const addToList = (field: keyof UserProfileData) => {
-        const value = newItem[field]?.trim();
+    const addToList = (field: keyof UserProfileData, forceValue?: string) => {
+        const value = forceValue || newItem[field]?.trim();
         if (!value) return;
         const list = profile[field] as string[];
         if (!list.includes(value)) {
             setProfile({ ...profile, [field]: [...list, value] });
         }
-        setNewItem({ ...newItem, [field]: '' });
+        if (!forceValue) {
+            setNewItem({ ...newItem, [field]: '' });
+        }
     };
 
     const removeFromList = (field: keyof UserProfileData, index: number) => {
@@ -184,6 +198,17 @@ export function UserProfile() {
                                 <option value="Follow-up Monitoring">Follow-up Monitoring</option>
                             </select>
                         </div>
+                        <div>
+                            <label className="text-sm text-gray-500 mb-1.5 block">Wearable RMSSD (ms) - Simulated</label>
+                            <input
+                                type="number"
+                                value={profile.currentRMSSD}
+                                onChange={(e) => setProfile({ ...profile, currentRMSSD: e.target.value })}
+                                placeholder="25"
+                                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-white/50 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 transition-all font-mono"
+                            />
+                            <p className="text-[10px] text-gray-400 mt-1">Simulates your current heart rate variability for energy level matching.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -233,6 +258,18 @@ export function UserProfile() {
                     onAdd={() => addToList('dietaryRestrictions')}
                     onRemove={(i) => removeFromList('dietaryRestrictions', i)}
                     placeholder="e.g., Gluten-free"
+                />
+                <TagCard
+                    icon={User}
+                    title="Interests & Hobbies"
+                    color="indigo"
+                    items={profile.interests}
+                    inputValue={newItem.interests || ''}
+                    onInputChange={(v) => setNewItem({ ...newItem, interests: v })}
+                    onAdd={(val) => addToList('interests', val)}
+                    onRemove={(i) => removeFromList('interests', i)}
+                    placeholder="Type or select interests..."
+                    suggestions={SUGGESTED_INTERESTS}
                 />
             </div>
 
@@ -318,17 +355,33 @@ interface TagCardProps {
     items: string[];
     inputValue: string;
     onInputChange: (value: string) => void;
-    onAdd: () => void;
+    onAdd: (forceValue?: string) => void;
     onRemove: (index: number) => void;
     placeholder: string;
+    suggestions?: string[];
 }
 
-function TagCard({ icon: Icon, title, color, items, inputValue, onInputChange, onAdd, onRemove, placeholder }: TagCardProps) {
-    const colorMap: Record<string, { bg: string; tag: string; icon: string; border: string }> = {
-        blue: { bg: 'bg-blue-100/80', tag: 'bg-blue-50/80 border-blue-200/60 text-blue-700', icon: 'text-blue-600', border: 'focus:ring-blue-300' },
-        red: { bg: 'bg-red-100/80', tag: 'bg-red-50/80 border-red-200/60 text-red-700', icon: 'text-red-600', border: 'focus:ring-red-300' },
-        purple: { bg: 'bg-purple-100/80', tag: 'bg-purple-50/80 border-purple-200/60 text-purple-700', icon: 'text-purple-600', border: 'focus:ring-purple-300' },
-        amber: { bg: 'bg-amber-100/80', tag: 'bg-amber-50/80 border-amber-200/60 text-amber-700', icon: 'text-amber-600', border: 'focus:ring-amber-300' },
+function TagCard({ icon: Icon, title, color, items, inputValue, onInputChange, onAdd, onRemove, placeholder, suggestions }: TagCardProps) {
+    const [filteredSuggestions, setFilteredSuggestions] = useState<string[]>([]);
+    
+    useEffect(() => {
+        if (suggestions && inputValue) {
+            const filtered = suggestions.filter(s => 
+                s.toLowerCase().includes(inputValue.toLowerCase()) && 
+                !items.includes(s)
+            );
+            setFilteredSuggestions(filtered);
+        } else {
+            setFilteredSuggestions([]);
+        }
+    }, [inputValue, suggestions, items]);
+
+    const colorMap: Record<string, { bg: string; tag: string; icon: string; border: string; highlight: string }> = {
+        blue: { bg: 'bg-blue-100/80', tag: 'bg-blue-50/80 border-blue-200/60 text-blue-700', icon: 'text-blue-600', border: 'focus:ring-blue-300', highlight: 'bg-blue-600 text-white' },
+        red: { bg: 'bg-red-100/80', tag: 'bg-red-50/80 border-red-200/60 text-red-700', icon: 'text-red-600', border: 'focus:ring-red-300', highlight: 'bg-red-600 text-white' },
+        purple: { bg: 'bg-purple-100/80', tag: 'bg-purple-50/80 border-purple-200/60 text-purple-700', icon: 'text-purple-600', border: 'focus:ring-purple-300', highlight: 'bg-purple-600 text-white' },
+        amber: { bg: 'bg-amber-100/80', tag: 'bg-amber-50/80 border-amber-200/60 text-amber-700', icon: 'text-amber-600', border: 'focus:ring-amber-300', highlight: 'bg-amber-600 text-white' },
+        indigo: { bg: 'bg-indigo-100/80', tag: 'bg-indigo-50/80 border-indigo-200/60 text-indigo-700', icon: 'text-indigo-600', border: 'focus:ring-indigo-300', highlight: 'bg-indigo-600 text-white' },
     };
     const c = colorMap[color] || colorMap.blue;
 
@@ -372,12 +425,34 @@ function TagCard({ icon: Icon, title, color, items, inputValue, onInputChange, o
                         className={`flex-1 px-3 py-2 rounded-xl bg-white/60 border border-white/50 text-sm shadow-sm focus:outline-none focus:ring-2 ${c.border} transition-all`}
                     />
                     <button
-                        onClick={onAdd}
+                        onClick={() => onAdd()}
                         className="p-2 rounded-xl backdrop-blur-md bg-white/70 border border-white/50 shadow hover:bg-white/90 transition-all hover:scale-105"
                     >
                         <Plus className="w-4 h-4 text-gray-600" />
                     </button>
                 </div>
+
+                {/* Suggestions Chips */}
+                {suggestions && (
+                    <div className="mt-4 pt-4 border-t border-white/30">
+                        <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-2 font-bold select-none">Suggested for you</p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {(filteredSuggestions.length > 0 ? filteredSuggestions.slice(0, 6) : suggestions.filter(s => !items.includes(s)).slice(0, 8)).map(s => (
+                                <button
+                                    key={s}
+                                    onClick={() => onAdd(s)}
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] border transition-all hover:scale-105 shadow-sm
+                                        ${inputValue && s.toLowerCase().includes(inputValue.toLowerCase()) 
+                                            ? c.highlight + ' border-transparent' 
+                                            : 'bg-white/40 border-white/50 text-gray-500 hover:bg-white/60'}
+                                    `}
+                                >
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

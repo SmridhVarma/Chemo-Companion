@@ -1,7 +1,69 @@
-import { Users, Calendar, Heart, MessageCircle, Bell } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Users, Calendar, Heart, MessageCircle, Bell, Loader2 } from 'lucide-react';
 import imgCommunity from "figma:asset/b9c4e79959ea4ad2f4ada235b0b7c0d0df14298a.png";
 
+interface Peer {
+  id: string;
+  name: string;
+  cancer_type: string;
+  recovery_score: number;
+  interests: string[];
+}
+
+interface Activity {
+  id: string;
+  name: string;
+  description: string;
+  energy_req: number;
+  interests: string[];
+}
+
 export function Community() {
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [recoveryScore, setRecoveryScore] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCommunityData = async () => {
+      setIsLoading(true);
+      try {
+        const stored = localStorage.getItem('chemo_companion_profile');
+        const profile = stored ? JSON.parse(stored) : null;
+        
+        const age = profile?.age ? parseInt(profile.age) : 60;
+        const rmssd = profile?.currentRMSSD ? parseFloat(profile.currentRMSSD) : 25.0;
+        const interests = profile?.interests || [];
+
+        // Fetch Matches
+        const matchingResponse = await fetch('/api/peers/match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_id: 'current_user', interests })
+        });
+        const matchingData = await matchingResponse.json();
+        setPeers(matchingData.peers || []);
+
+        // Fetch Recommendations
+        const recResponse = await fetch('/api/aac/recommend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ age, rmssd, interests })
+        });
+        const recData = await recResponse.json();
+        setActivities(recData.activities || []);
+        setRecoveryScore(recData.recovery_score);
+
+      } catch (error) {
+        console.error("Error fetching community data:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCommunityData();
+  }, []);
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       {/* Header */}
@@ -80,18 +142,23 @@ export function Community() {
             <h2 className="text-lg font-serif text-gray-800 mb-4">Peer Support Matches</h2>
             
             <div className="space-y-3">
-              <SupportMatch
-                name="Sarah Lim"
-                description="Looking for a mentor in stage 2 therapy"
-                status="new"
-                color="indigo"
-              />
-              <SupportMatch
-                name="David Tan"
-                description="Seeking expert nutrition tips"
-                status="pending"
-                color="purple"
-              />
+              {isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                </div>
+              ) : peers.length > 0 ? (
+                peers.map(peer => (
+                  <SupportMatch
+                    key={peer.id}
+                    name={peer.name}
+                    description={`${peer.cancer_type} • shared interests`}
+                    status="new"
+                    color="indigo"
+                  />
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">No matching peers found yet.</p>
+              )}
             </div>
           </div>
         </div>
@@ -110,20 +177,24 @@ export function Community() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ActivityCard
-              emoji="🧘‍♀️"
-              title="Gentle Tai Chi"
-              description="Join Maria for community breathing exercises and relaxation"
-              attendees={12}
-              color="indigo"
-            />
-            <ActivityCard
-              emoji="🍎"
-              title="Cancer Nutrition Q&A"
-              description="Relaxing nutritional video therapy session"
-              attendees={24}
-              color="purple"
-            />
+            {isLoading ? (
+              <div className="col-span-2 flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-purple-500" />
+              </div>
+            ) : activities.length > 0 ? (
+              activities.map(act => (
+                <ActivityCard
+                  key={act.id}
+                  emoji={act.energy_req > 50 ? "🏃" : "🧘"}
+                  title={act.name}
+                  description={act.description}
+                  attendees={Math.floor(Math.random() * 20) + 5}
+                  color={act.energy_req > 50 ? "indigo" : "purple"}
+                />
+              ))
+            ) : (
+              <p className="col-span-2 text-sm text-gray-500 text-center py-4">No specific activities recommended for your current profile.</p>
+            )}
           </div>
         </div>
       </div>
