@@ -7,22 +7,46 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import sys
+from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import GRAPH_DIR
+from database import supabase_client as supa
 
 # ── AAC & Peer Matching (FR 6) ─────────────────────────
 from knowledge.matcher import calculate_recovery_score, find_similar_peers, recommend_aac_activities
 from knowledge.graph_builder import build_graph
+from agents.report_agent import run_report_pipeline
+from agents.merlion_client import transcribe_audio, generate_text
+
+# ── Pydantic v1 Patch for ChromaDB (Python 3.14+) ──────
+import pydantic.v1.fields
+_orig_ModelField_init = pydantic.v1.fields.ModelField.__init__
+
+def patched_ModelField_init(self, *args, **kwargs):
+    try:
+        _orig_ModelField_init(self, *args, **kwargs)
+    except Exception as e:
+        if "chroma_server_nofile" in str(e):
+            # Force the type and retry initialization
+            if 'type_' not in kwargs:
+                kwargs['type_'] = int
+            _orig_ModelField_init(self, *args, **kwargs)
+        else:
+            raise e
+
+pydantic.v1.fields.ModelField.__init__ = patched_ModelField_init
 
 # Load the Knowledge Graph once at startup
 G = build_graph()
+
+# ── Main API server ───────────────────────────────────
 
 app = FastAPI(
     title="Chemo Companion API",
@@ -57,6 +81,34 @@ class ChatResponse(BaseModel):
 class GraphQueryRequest(BaseModel):
     entity: str
     depth: int = 2
+
+class SymptomLogRequest(BaseModel):
+    patient_id: str
+    symptom_name: str
+    severity: str
+    score: Optional[float] = None
+    context: Optional[str] = None
+
+class DiagnoseRequest(BaseModel):
+    patient_id: str
+    context: Optional[str] = None
+
+class ReportRequest(BaseModel):
+    patient_id: str
+
+
+@app.post("/api/diagnose")
+async def run_diagnosis(req: DiagnoseRequest):
+    """Trigger clinical assessment via DiagnosisAgent."""
+    from agents.diagnosis_agent import DiagnosisAgent
+    def _run():
+        agent = DiagnosisAgent()
+        return agent.assess(req.patient_id, req.context)
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _run)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Agent Pipeline ─────────────────────────────────────
@@ -224,6 +276,70 @@ async def recommend_activities(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── Team Project Endpoints (RESTORED) ──────────────────
+
+@app.get("/api/patients")
+async def get_patients():
+    """List all patients from Supabase."""
+    try:
+        patients = supa.get_patients()
+        return {"patients": patients}
+    except Exception as e:
+        return {"patients": [], "error": str(e)}
+
+@app.get("/api/patients/{patient_id}")
+async def get_patient(patient_id: str):
+    """Get single patient details."""
+    try:
+        patient = supa.get_patient(patient_id)
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        return patient
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/patients")
+async def add_patient(request: Request):
+    """Add a new patient (stub for legacy support)."""
+    try:
+        data = await request.json()
+        result = supa.insert_patient(data)
+        return {"status": "success", "data": result.data if hasattr(result, 'data') else result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/symptoms/log")
+async def log_symptom(req: SymptomLogRequest):
+    """Log a patient symptom."""
+    try:
+        data = {
+            "patient_id": req.patient_id,
+            "symptom_name": req.symptom_name,
+            "severity": req.severity,
+            "score": req.score,
+            "context": req.context
+        }
+        result = supa.log_symptom(data)
+        return {"status": "success", "data": result.data if hasattr(result, 'data') else result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/report/generate")
+async def generate_report_endpoint(request: ReportRequest):
+    """Generate a PDF clinical report using MerLION insights."""
+    from agents.report_agent import run_report_pipeline
+    try:
+        result = run_report_pipeline(request.patient_id)
+        # Construct download URL (assuming /reports is mounted)
+        download_url = f"/reports/{result['filename']}"
+        result["download_url"] = download_url
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
@@ -384,7 +500,6 @@ async def audio_transcribe(file: UploadFile = File(...)):
     through the existing multi-agent pipeline (Gemini Writer).
     Returns the same ChatResponse as /api/chat.
     """
-    from agents.merlion_client import transcribe_audio
     from safety import check_safety
 
     # Validate file type (strip codec params like "audio/webm;codecs=opus" → "audio/webm")
@@ -499,12 +614,36 @@ def run_graph_build():
     }
 
 
+@app.post("/api/reports/generate")
+async def generate_report_endpoint(patient_id: Optional[str] = None):
+    """Trigger the report generation pipeline for a patient."""
+    target_id = patient_id or "7c5fca7a-e68c-4e86-96e0-cd3bc1fb8974"
+    try:
+        print(f"[API] Generating report for patient: {target_id}")
+        result = run_report_pipeline(target_id)
+        
+        # Convert absolute path to relative URL for frontend
+        filename = result.get("filename")
+        if filename:
+            result["download_url"] = f"/reports/{filename}"
+            
+        return result
+    except Exception as e:
+        print(f"[API] Report generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Static File Serving (React Frontend) ─────────────
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend_from_figma" / "dist"
+REPORT_DIR = Path(__file__).resolve().parent / "reports"
+REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Serve generated reports
+app.mount("/reports", StaticFiles(directory=str(REPORT_DIR)), name="reports")
 
 # Serve static assets (CSS, JS bundles in assets/)
 app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="assets")

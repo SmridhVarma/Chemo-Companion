@@ -1,4 +1,5 @@
-import { TrendingDown, Activity, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { TrendingDown, Activity, CheckCircle, ArrowLeft, FileText, Loader2, X, Download } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import imgDoctor from "figma:asset/57f83801297436fb573a8a2b699bd3c446628dfb.png";
 import type { CheckInEntry } from '../types';
@@ -27,6 +28,31 @@ const historicalCheckIns: CheckInEntry[] = [
 ];
 
 export function ClinicalHistory({ checkIns }: ClinicalHistoryProps) {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [reportUrl, setReportUrl] = useState<string | null>(null);
+
+  const handleGenerateReport = async () => {
+    setIsGenerating(true);
+    try {
+      const patientId = "7c5fca7a-e68c-4e86-96e0-cd3bc1fb8974";
+      const response = await fetch('/api/reports/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patient_id: patientId })
+      });
+      
+      if (!response.ok) throw new Error('Generation failed');
+      
+      const data = await response.json();
+      setReportUrl(data.download_url);
+    } catch (error) {
+      console.error('Error generating report:', error);
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const reportCheckIns = mergeCheckIns(checkIns);
   const painLevelData = reportCheckIns.map((entry) => ({
     day: formatDay(entry.createdAt),
@@ -226,9 +252,17 @@ export function ClinicalHistory({ checkIns }: ClinicalHistoryProps) {
             </div>
           </div>
 
-          <button className="w-full backdrop-blur-md bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-600 hover:to-indigo-600 text-white py-4 px-8 rounded-2xl shadow-xl border border-white/30 transition-all hover:scale-[1.02] flex items-center justify-center gap-3">
-            <FileText className="w-5 h-5" />
-            <span className="font-semibold">Generate PDF for Doctor</span>
+          <button 
+            onClick={handleGenerateReport}
+            disabled={isGenerating}
+            className={`w-full backdrop-blur-md bg-gradient-to-r from-purple-600/90 to-indigo-600/90 hover:from-purple-600 hover:to-indigo-600 text-white py-4 px-8 rounded-2xl shadow-xl border border-white/30 transition-all hover:scale-[1.02] flex items-center justify-center gap-3 disabled:opacity-70 disabled:hover:scale-100`}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <FileText className="w-5 h-5" />
+            )}
+            <span className="font-semibold">{isGenerating ? 'Generating Report...' : 'Generate PDF for Doctor'}</span>
           </button>
 
           <p className="text-center text-xs text-gray-500 mt-3">
@@ -236,6 +270,50 @@ export function ClinicalHistory({ checkIns }: ClinicalHistoryProps) {
           </p>
         </div>
       </div>
+
+      {/* Success Notification Popup */}
+      {reportUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm bg-black/20 animate-in fade-in duration-300">
+          <div className="backdrop-blur-2xl bg-white/90 rounded-[2rem] p-8 shadow-2xl border border-white/60 max-w-sm w-full relative overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-purple-500 to-indigo-500" />
+            
+            <button 
+              onClick={() => setReportUrl(null)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+
+            <div className="text-center">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-8 h-8 text-emerald-500" />
+              </div>
+              
+              <h3 className="text-xl font-bold text-gray-800 mb-2">Health Report Ready</h3>
+              <p className="text-sm text-gray-600 mb-8">
+                Your weekly oncology summary has been successfully generated for your physician.
+              </p>
+
+              <div className="space-y-3">
+                <a 
+                  href={reportUrl} 
+                  download 
+                  className="flex items-center justify-center gap-2 w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition-all hover:shadow-indigo-200"
+                >
+                  <Download className="w-5 h-5" />
+                  Download PDF
+                </a>
+                <button 
+                  onClick={() => setReportUrl(null)}
+                  className="w-full py-3 text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
