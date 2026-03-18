@@ -250,3 +250,29 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "recording.wav",
     print(f"[MerLION] Transcription: {text[:100]}...")
 
     return text
+
+
+def generate_text(prompt: str, temperature: float = 0.7) -> str:
+    """
+    Generate text via MerLION LLM for clinical summaries/insights.
+    """
+    resp = requests.post(
+        f"{MERLION_BASE_URL}/chat",
+        headers=_headers(),
+        json={
+            "instruction": prompt,
+            "hyperParameters": {
+                "temperature": temperature,
+                "topP": 0.9,
+                "maxTokens": 1024,
+            },
+        },
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if data.get("status", {}).get("code") != 200:
+        raise RuntimeError(f"MerLION /chat failed: {data.get('status', {}).get('description', 'Unknown error')}")
+
+    return data["response"]["text"]

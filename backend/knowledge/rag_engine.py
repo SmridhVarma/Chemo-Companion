@@ -10,7 +10,6 @@ from typing import Optional
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import GRAPH_DIR, TOP_K_RESULTS
-from knowledge.vector_store import get_store
 from knowledge.graph_builder import load_graph, query_graph
 
 
@@ -24,7 +23,12 @@ class RAGEngine:
     @property
     def store(self):
         if self._store is None:
-            self._store = get_store()
+            try:
+                from knowledge.vector_store import get_store
+                self._store = get_store()
+            except Exception as e:
+                print(f"[RAG Engine] Failed to load vector store: {e}")
+                self._store = None
         return self._store
 
     @property
@@ -43,7 +47,35 @@ class RAGEngine:
         Returns context, sources, and a confidence score.
         """
         # 1. Vector search (semantic)
-        vector_results = self.store.search(query, top_k=top_k)
+        vector_results = []
+        try:
+            if self.store:
+                vector_results = self.store.search(query, top_k=top_k)
+            else:
+                raise ValueError("Vector store not initialized")
+        except Exception as e:
+            print(f"[RAG Engine] Vector search failed: {e}. Falling back to keyword search.")
+            try:
+                from config import EXTRACTED_TEXT_DIR
+                chunks_file = EXTRACTED_TEXT_DIR / "all_chunks.json"
+                if chunks_file.exists():
+                    with open(chunks_file, "r", encoding="utf-8") as f:
+                        all_chunks = json.load(f)
+                    query_words = set(query.lower().split())
+                    matches = []
+                    for chunk in all_chunks:
+                        text = chunk.get("text", "").lower()
+                        score = sum(1 for word in query_words if word in text)
+                        if score > 0:
+                            matches.append((score, chunk))
+                    matches.sort(key=lambda x: x[0], reverse=True)
+                    vector_results = [m[1] for m in matches[:top_k]]
+                    for hit in vector_results:
+                        hit.setdefault("similarity", 0.5) # Dummy similarity
+                        hit.setdefault("source", "Unknown")
+                        hit.setdefault("page", 0)
+            except Exception as fe:
+                print(f"[RAG Engine] Keyword fallback failed: {fe}")
 
         # 2. Graph traversal (structured)
         graph_results = []

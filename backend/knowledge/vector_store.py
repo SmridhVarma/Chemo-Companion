@@ -9,6 +9,14 @@ from typing import Optional
 import chromadb
 from chromadb.config import Settings
 
+# ── Pydantic v1 Patch for ChromaDB ──────────────────────
+try:
+    if "chroma_server_nofile" in Settings.__fields__:
+        Settings.__fields__["chroma_server_nofile"].type_ = int
+        Settings.__fields__["chroma_server_nofile"].required = False
+except Exception:
+    pass
+
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (
@@ -88,9 +96,9 @@ class VectorStore:
     @property
     def client(self):
         if self._client is None:
+            # Removed explicit Settings(anonymized_telemetry=False) to avoid Pydantic v1/v2 conflict
             self._client = chromadb.PersistentClient(
-                path=str(self.persist_dir),
-                settings=Settings(anonymized_telemetry=False),
+                path=str(self.persist_dir)
             )
         return self._client
 
