@@ -15,7 +15,7 @@ cd ..
 echo.
 echo [*] Setting up Backend Virtual Environment...
 cd backend
-python -m venv venv
+py -m venv venv
 call venv\Scripts\pip install -r requirements.txt
 cd ..
 
