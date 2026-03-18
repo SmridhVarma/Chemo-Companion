@@ -9,7 +9,7 @@ taskkill /F /IM python.exe 2>NUL
 
 echo [*] Starting Backend Server (Port 8000)...
 cd backend
-start "Chemo Companion Backend" /min py -m uvicorn app:app --host 0.0.0.0 --port 8000
+start "Chemo Companion Backend" /min venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 8000
 
 echo [*] Waiting for server to initialize...
 timeout /t 5 /nobreak >NUL
