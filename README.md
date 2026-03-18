@@ -2,8 +2,6 @@
 
 Chemo Companion is a comprehensive, RAG-powered oncology knowledge assistant designed to support patients undergoing chemotherapy. It acts as a unified platform that combines clinical symptom tracking, AI-powered multi-agent chat, peer matching, and clinical report generation.
 
-![Chemo Companion](frontend_from_figma/public/vite.svg) <!-- Replace with actual banner image if available -->
-
 ## ✨ Features
 
 - **AI-Powered Oncology Assistant**: Multi-agent chat pipeline (using Gemini) that pulls verified knowledge to answer patient questions securely.
